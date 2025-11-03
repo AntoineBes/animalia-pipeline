@@ -1,0 +1,31 @@
+{
+  "key": 133137353,
+  "nubKey": 7191237,
+  "nameKey": 1690741,
+  "taxonID": "6613",
+  "kingdom": "Animalia",
+  "order": "Strigiformes",
+  "family": "Strigidae",
+  "kingdomKey": 135274602,
+  "classKey": 135274603,
+  "orderKey": 135274604,
+  "familyKey": 135274614,
+  "datasetKey": "47f16512-bf31-410f-b272-d151c996b2f6",
+  "parentKey": 135274614,
+  "parent": "Strigidae",
+  "scientificName": "Bubo bubo bubo",
+  "canonicalName": "Bubo bubo bubo",
+  "authorship": "",
+  "nameType": "SCIENTIFIC",
+  "rank": "SUBSPECIES",
+  "origin": "SOURCE",
+  "taxonomicStatus": "ACCEPTED",
+  "nomenclaturalStatus": [],
+  "numDescendants": 0,
+  "lastCrawled": "2023-08-24T13:57:00.969+00:00",
+  "lastInterpreted": "2017-10-08T14:56:38.699+00:00",
+  "issues": [
+    "VERNACULAR_NAME_INVALID"
+  ],
+  "class": "Aves"
+}

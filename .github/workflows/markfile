@@ -1,0 +1,9 @@
+lint:
+	black --check src/
+	flake8 src/
+
+test:
+	python -m unittest discover src/tests
+
+run:
+	python src/main.py "Cervus elaphus"
