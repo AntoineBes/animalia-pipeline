@@ -1,5 +1,22 @@
-pandas
-requests
-tqdm
-unidecode
-pydantic
+# ============================================
+# DÉPENDANCES DU PIPELINE ANIMALIA
+# ============================================
+# Versions spécifiées pour assurer la reproductibilité
+
+# Manipulation de données
+pandas>=2.0.0,<3.0.0
+
+# Requêtes HTTP
+requests>=2.31.0,<3.0.0
+
+# Barre de progression
+tqdm>=4.65.0,<5.0.0
+
+# Normalisation de texte (accents, caractères spéciaux)
+unidecode>=1.3.6,<2.0.0
+
+# Validation de données
+pydantic>=2.0.0,<3.0.0
+
+# Gestion des variables d'environnement
+python-dotenv>=1.0.0,<2.0.0

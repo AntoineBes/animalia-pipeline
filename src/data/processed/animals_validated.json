@@ -1,12 +1,12 @@
 [
   {
-    "nom": "Cervus elaphus",
-    "nom_commum": "Ciervo Ibérico",
-    "rang": "SPECIES",
+    "nom": "Panthera tigris",
+    "nom_commun": null,
+    "rang": null,
     "statutUICN": null,
-    "ordre": "Artiodactyla",
-    "famille": "Cervidae",
-    "genre": "Cervus",
+    "ordre": null,
+    "famille": null,
+    "genre": null,
     "descriptions": null,
     "imageUrl": null
   }

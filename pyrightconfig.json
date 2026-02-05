@@ -1,0 +1,29 @@
+{
+    "include": [
+        "src"
+    ],
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        ".venv",
+        ".git"
+    ],
+    "ignore": [
+        "**/tests"
+    ],
+    "executionEnvironments": [
+        {
+            "root": "src",
+            "pythonVersion": "3.11",
+            "pythonPlatform": "Windows",
+            "extraPaths": [
+                "src"
+            ]
+        }
+    ],
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": false,
+    "pythonVersion": "3.11",
+    "venvPath": ".",
+    "venv": ".venv"
+}

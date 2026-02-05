@@ -1,0 +1,1022 @@
+================================================================================
+                    DOCUMENTATION TECHNIQUE - PIPELINE ANIMALIA
+================================================================================
+
+Date de dernière mise à jour : 2026-02-05
+Version : 2.0
+Auteur : antoine95560@hotmail.fr
+
+================================================================================
+TABLE DES MATIÈRES
+================================================================================
+
+1. PRÉSENTATION GÉNÉRALE
+2. ARCHITECTURE DU PIPELINE
+3. DESCRIPTION DÉTAILLÉE DES MODULES
+4. PROCESSUS DE LA PIPELINE (ÉTAPES)
+5. INSTALLATION ET DÉMARRAGE DU PROJET
+6. TESTS ET VALIDATION
+7. CONFIGURATION ET VARIABLES D'ENVIRONNEMENT
+8. MISE EN PRODUCTION
+9. MAINTENANCE ET DÉPANNAGE
+10. ANNEXES
+
+================================================================================
+1. PRÉSENTATION GÉNÉRALE
+================================================================================
+
+Le pipeline Animalia est un système ETL (Extract, Transform, Load) automatisé
+qui récupère des données d'espèces animales depuis l'API GBIF (Global 
+Biodiversity Information Facility), les transforme, les valide et les envoie
+vers une API REST locale.
+
+OBJECTIF :
+----------
+Créer un flux de données fiable et reproductible pour alimenter une base de
+données d'espèces animales avec des informations scientifiques validées.
+
+TECHNOLOGIES UTILISÉES :
+------------------------
+- Python 3.11+
+- Pydantic (validation de données)
+- Requests (requêtes HTTP)
+- Pandas (manipulation de données)
+- Python-dotenv (gestion de configuration)
+
+FLUX DE DONNÉES :
+-----------------
+GBIF API → Données brutes (JSON) → Transformation → Validation → API locale
+
+================================================================================
+2. ARCHITECTURE DU PIPELINE
+================================================================================
+
+STRUCTURE DU PROJET :
+---------------------
+pipeline/
+├── .env.example              # Template de configuration
+├── .env                      # Configuration locale (non versionné)
+├── requirements.txt          # Dépendances Python
+├── README.md                 # Documentation utilisateur
+├── DOCUMENTATION_TECHNIQUE.txt  # Ce fichier
+│
+└── src/
+    ├── config.py             # Configuration centralisée
+    ├── fetch.py              # Module 1: Récupération GBIF
+    ├── fetch_all.py          # Récupération en masse
+    ├── transform.py          # Module 2: Transformation
+    ├── validate.py           # Module 3: Validation
+    ├── send.py               # Module 4: Envoi API
+    ├── main.py               # Orchestrateur principal
+    │
+    ├── data/
+    │   ├── raw/              # Données brutes GBIF
+    │   └── processed/        # Données transformées et validées
+    │
+    └── tests/
+        ├── test_fetch.py
+        ├── test_transform.py
+        ├── test_validate.py
+        ├── test_send.py
+        └── test_pipeline_integration.py
+
+MODULES PRINCIPAUX :
+--------------------
+
+1. config.py
+   - Centralise toute la configuration
+   - Charge les variables d'environnement
+   - Fournit des valeurs par défaut
+
+2. fetch.py
+   - Interroge l'API GBIF
+   - Récupère les détails d'une espèce
+   - Sauvegarde les données brutes
+
+3. transform.py
+   - Charge les fichiers JSON bruts
+   - Normalise le format
+   - Élimine les doublons
+
+4. validate.py
+   - Définit le schéma Pydantic
+   - Valide chaque enregistrement
+   - Génère des rapports d'erreurs
+
+5. send.py
+   - Envoie les données à l'API
+   - Gère les erreurs réseau
+   - Crée des rapports d'échecs
+
+6. main.py
+   - Orchestre le pipeline complet
+   - Gère les erreurs entre étapes
+   - Fournit des logs détaillés
+
+================================================================================
+3. DESCRIPTION DÉTAILLÉE DES MODULES
+================================================================================
+
+3.1 CONFIG.PY - Configuration Centralisée
+------------------------------------------
+
+RÔLE :
+- Charger les variables d'environnement depuis .env
+- Fournir des valeurs par défaut sécurisées
+- Centraliser tous les paramètres configurables
+
+VARIABLES PRINCIPALES :
+- API_URL : URL de l'API cible
+- HTTP_TIMEOUT : Timeout des requêtes (30s par défaut)
+- GBIF_API_URL : URL de l'API GBIF
+- LOG_LEVEL : Niveau de logging (INFO, DEBUG, etc.)
+- PRODUCTION_MODE : Active/désactive les logs verbeux
+
+MÉTHODES UTILES :
+- Config.get_raw_data_path() : Chemin vers data/raw/
+- Config.get_processed_data_path() : Chemin vers data/processed/
+- Config.display_config() : Affiche la configuration actuelle
+
+3.2 FETCH.PY - Récupération GBIF
+---------------------------------
+
+FONCTIONS PRINCIPALES :
+
+get_raw_data_dir()
+- Retourne le chemin vers data/raw/
+
+fetch_gbif_animal_detail(animal_name: str)
+- Recherche l'espèce sur GBIF
+- Récupère l'usageKey (identifiant unique)
+- Télécharge les détails complets
+- Sauvegarde dans data/raw/gbif_{nom_espece}.json
+
+GESTION D'ERREURS :
+- Erreurs réseau (requests.RequestException)
+- Espèces introuvables (résultats vides)
+- Erreurs d'écriture de fichier
+
+FICHIERS GÉNÉRÉS :
+- data/raw/gbif_Cervus_elaphus.json (exemple)
+
+3.3 TRANSFORM.PY - Transformation
+----------------------------------
+
+FONCTIONS PRINCIPALES :
+
+load_all_jsons_in_folder(folder_path: str)
+- Charge tous les fichiers gbif_*.json
+- Gère les erreurs de format JSON
+- Retourne une liste de dictionnaires
+
+transform_gbif_species(raw_data: list)
+- Normalise les champs GBIF au format attendu
+- Élimine les doublons par nom scientifique
+- Retourne les données structurées
+
+export_to_json(data: list, out_file: str)
+- Exporte au format JSON indenté
+- Préserve les caractères accentués (ensure_ascii=False)
+
+MAPPING DES CHAMPS :
+GBIF                    →  Format normalisé
+scientificName          →  nom
+vernacularName          →  nom_commun
+rank                    →  rang
+order                   →  ordre
+family                  →  famille
+genus                   →  genre
+description             →  descriptions
+(non fourni)            →  statutUICN (null)
+(non fourni)            →  imageUrl (null)
+
+FICHIERS GÉNÉRÉS :
+- data/processed/animals_transformed.json
+- data/processed/{espece}_transformed.json
+
+3.4 VALIDATE.PY - Validation
+-----------------------------
+
+MODÈLE PYDANTIC - AnimalModel :
+
+Champs obligatoires :
+- nom : str (nom scientifique)
+
+Champs optionnels :
+- nom_commun : str
+- rang : str
+- statutUICN : str (validé avec liste officielle)
+- ordre : str
+- famille : str
+- genre : str
+- descriptions : str
+- imageUrl : str
+
+STATUTS UICN VALIDES :
+- EX : Éteint
+- EW : Éteint à l'état sauvage
+- CR : En danger critique
+- EN : En danger
+- VU : Vulnérable
+- NT : Quasi menacé
+- LC : Préoccupation mineure
+- DD : Données insuffisantes
+
+FONCTION PRINCIPALE :
+
+validate_animals(json_path: str, output_dir: str = None)
+- Charge le fichier JSON
+- Valide chaque enregistrement avec Pydantic
+- Sépare les données valides des erreurs
+- Exporte les résultats
+
+FICHIERS GÉNÉRÉS :
+- data/processed/animals_validated.json (données valides)
+- data/processed/animals_validation_errors.json (erreurs, si présentes)
+
+3.5 SEND.PY - Envoi vers l'API
+-------------------------------
+
+FONCTION PRINCIPALE :
+
+send_animals_to_api(json_file_path: str)
+- Charge les animaux validés
+- Envoie chaque animal via POST à l'API
+- Gère les timeouts et erreurs réseau
+- Génère un rapport d'erreurs
+
+CODES HTTP GÉRÉS :
+- 200/201 : Succès
+- 4xx : Erreur client (données invalides)
+- 5xx : Erreur serveur
+- Timeout : Dépassement du délai
+- ConnectionError : API non disponible
+
+FICHIERS GÉNÉRÉS :
+- data/processed/send_errors.json (uniquement en cas d'erreurs)
+
+3.6 MAIN.PY - Orchestrateur
+----------------------------
+
+FONCTION PRINCIPALE :
+
+run_pipeline(animal_name: str = "Cervus elaphus")
+- Exécute les 4 étapes séquentiellement
+- Stoppe en cas d'erreur
+- Retourne True/False selon le succès
+
+ÉTAPES EXÉCUTÉES :
+1. FETCH : Récupération GBIF
+2. TRANSFORM : Normalisation
+3. VALIDATE : Validation Pydantic
+4. SEND : Envoi API
+
+UTILISATION EN LIGNE DE COMMANDE :
+python main.py                    # Espèce par défaut
+python main.py "Panthera tigris"  # Espèce spécifique
+
+================================================================================
+4. PROCESSUS DE LA PIPELINE (ÉTAPES DÉTAILLÉES)
+================================================================================
+
+ÉTAPE 1 : FETCH - Récupération depuis GBIF
+-------------------------------------------
+
+ENTRÉE : Nom scientifique de l'espèce (ex: "Cervus elaphus")
+
+PROCESSUS :
+1. Recherche sur GBIF API : GET /v1/species/search?q={nom}
+2. Extraction de l'usageKey du premier résultat
+3. Récupération des détails : GET /v1/species/{usageKey}
+4. Sauvegarde JSON dans data/raw/
+
+SORTIE : data/raw/gbif_{nom_espece}.json
+
+DURÉE ESTIMÉE : 1-3 secondes par espèce
+
+POINTS DE CONTRÔLE :
+✓ L'espèce existe sur GBIF
+✓ Le fichier JSON est créé
+✓ Le fichier contient des données valides
+
+ÉTAPE 2 : TRANSFORM - Transformation et normalisation
+------------------------------------------------------
+
+ENTRÉE : Fichiers JSON bruts (gbif_*.json)
+
+PROCESSUS :
+1. Chargement de tous les fichiers du dossier data/raw/
+2. Extraction des champs pertinents
+3. Normalisation des valeurs (None pour champs vides)
+4. Élimination des doublons par nom scientifique
+5. Export au format standardisé
+
+SORTIE : data/processed/animals_transformed.json
+
+DURÉE ESTIMÉE : < 1 seconde pour 100 espèces
+
+POINTS DE CONTRÔLE :
+✓ Tous les fichiers sont chargés
+✓ Les doublons sont éliminés
+✓ Le format de sortie est conforme
+
+ÉTAPE 3 : VALIDATE - Validation stricte
+----------------------------------------
+
+ENTRÉE : data/processed/animals_transformed.json
+
+PROCESSUS :
+1. Chargement du fichier JSON
+2. Validation de chaque enregistrement avec Pydantic
+3. Séparation valides/invalides
+4. Export des deux listes
+
+SORTIE :
+- data/processed/animals_validated.json
+- data/processed/animals_validation_errors.json (si erreurs)
+
+DURÉE ESTIMÉE : < 1 seconde pour 100 espèces
+
+POINTS DE CONTRÔLE :
+✓ Le fichier animals_validated.json existe
+✓ Il contient au moins un animal
+✓ Les erreurs sont documentées (si présentes)
+
+ÉTAPE 4 : SEND - Envoi vers l'API
+----------------------------------
+
+ENTRÉE : data/processed/animals_validated.json
+
+PROCESSUS :
+1. Chargement des animaux validés
+2. Pour chaque animal :
+   - POST vers API_URL
+   - Vérification du code HTTP
+   - Enregistrement des erreurs
+3. Génération du rapport final
+
+SORTIE :
+- Logs détaillés
+- data/processed/send_errors.json (si erreurs)
+
+DURÉE ESTIMÉE : 0.5-1 seconde par animal (selon l'API)
+
+POINTS DE CONTRÔLE :
+✓ L'API est accessible
+✓ Les animaux sont enregistrés (200/201)
+✓ Les erreurs sont tracées
+
+================================================================================
+5. INSTALLATION ET DÉMARRAGE DU PROJET
+================================================================================
+
+5.1 PRÉREQUIS
+-------------
+
+SYSTÈME :
+- Windows, Linux ou macOS
+- Python 3.11 ou supérieur
+- pip (gestionnaire de paquets Python)
+- Accès Internet (pour GBIF)
+- API REST locale (pour l'envoi)
+
+VÉRIFICATION DE PYTHON :
+```
+python --version
+# ou
+python3 --version
+```
+
+Si Python n'est pas installé, télécharger depuis : https://www.python.org/
+
+5.2 INSTALLATION
+----------------
+
+ÉTAPE 1 : Cloner ou télécharger le projet
+```
+cd c:\Users\antoi\OneDrive\Bureau\Animalia\pipeline
+```
+
+ÉTAPE 2 : Créer un environnement virtuel (RECOMMANDÉ)
+```
+python -m venv .venv
+```
+
+ÉTAPE 3 : Activer l'environnement virtuel
+
+Windows PowerShell :
+```
+.\.venv\Scripts\Activate.ps1
+```
+
+Windows CMD :
+```
+.venv\Scripts\activate.bat
+```
+
+Linux/macOS :
+```
+source .venv/bin/activate
+```
+
+ÉTAPE 4 : Installer les dépendances
+```
+pip install -r requirements.txt
+```
+
+VÉRIFICATION :
+```
+pip list
+# Doit afficher : pandas, requests, pydantic, python-dotenv, etc.
+```
+
+ÉTAPE 5 : Configurer l'environnement
+
+Copier le fichier d'exemple :
+```
+copy .env.example .env
+# ou sur Linux/macOS : cp .env.example .env
+```
+
+Éditer .env avec vos paramètres :
+```
+API_URL=http://localhost:3000/animaux
+HTTP_TIMEOUT=30
+LOG_LEVEL=INFO
+```
+
+5.3 DÉMARRAGE RAPIDE
+---------------------
+
+TEST DE CONFIGURATION :
+```
+python src/config.py
+```
+→ Doit afficher la configuration actuelle
+
+EXÉCUTION DU PIPELINE COMPLET :
+```
+python src/main.py
+```
+→ Exécute le pipeline pour "Cervus elaphus"
+
+AVEC UNE ESPÈCE SPÉCIFIQUE :
+```
+python src/main.py "Panthera tigris"
+```
+
+EXÉCUTION MODULE PAR MODULE :
+
+1. Récupération uniquement :
+```
+python src/fetch.py
+```
+
+2. Transformation uniquement :
+```
+python src/transform.py
+```
+
+3. Validation uniquement :
+```
+python src/validate.py
+```
+
+4. Envoi uniquement :
+```
+python src/send.py
+```
+
+5.4 VÉRIFICATION DE L'INSTALLATION
+-----------------------------------
+
+VÉRIFIER LES IMPORTS :
+```
+python -c "from src import fetch, transform, validate, send, main, config"
+```
+→ Ne doit afficher aucune erreur
+
+VÉRIFIER LA STRUCTURE :
+```
+dir src
+# ou sur Linux/macOS : ls src
+```
+→ Doit lister : fetch.py, transform.py, validate.py, send.py, main.py, config.py
+
+================================================================================
+6. TESTS ET VALIDATION
+================================================================================
+
+6.1 TESTS UNITAIRES
+--------------------
+
+Le projet inclut une suite de tests unitaires dans src/tests/
+
+LANCER TOUS LES TESTS :
+```
+python -m unittest discover src/tests -v
+```
+
+LANCER UN TEST SPÉCIFIQUE :
+```
+python -m unittest src/tests/test_validate.py
+```
+
+TESTS DISPONIBLES :
+- test_fetch.py : Tests de récupération GBIF
+- test_transform.py : Tests de transformation
+- test_validate.py : Tests de validation Pydantic
+- test_send.py : Tests d'envoi API (mock)
+- test_pipeline_integration.py : Test d'intégration complet
+
+6.2 TESTS MANUELS
+-----------------
+
+TEST 1 : Récupération d'une espèce
+```
+python src/fetch.py
+```
+→ Vérifier que data/raw/ contient les fichiers JSON
+
+TEST 2 : Transformation
+```
+python src/transform.py
+```
+→ Vérifier data/processed/animals_transformed.json
+
+TEST 3 : Validation
+```
+python src/validate.py
+```
+→ Vérifier data/processed/animals_validated.json
+
+TEST 4 : Configuration
+```
+python src/config.py
+```
+→ Vérifier que les paramètres sont corrects
+
+6.3 VALIDATION DES DONNÉES
+---------------------------
+
+VÉRIFIER LE FORMAT JSON :
+```
+python -m json.tool data/processed/animals_validated.json
+```
+
+COMPTER LES ANIMAUX VALIDÉS :
+```
+python -c "import json; print(len(json.load(open('data/processed/animals_validated.json', encoding='utf8'))))"
+```
+
+VÉRIFIER LES ERREURS :
+```
+type data\processed\animals_validation_errors.json
+# ou sur Linux/macOS : cat data/processed/animals_validation_errors.json
+```
+
+================================================================================
+7. CONFIGURATION ET VARIABLES D'ENVIRONNEMENT
+================================================================================
+
+7.1 FICHIER .ENV
+----------------
+
+Le fichier .env contient toute la configuration du pipeline.
+NE JAMAIS versionner ce fichier (ajouté au .gitignore).
+
+TEMPLATE COMPLET (.env.example) :
+
+# API Configuration
+API_URL=http://localhost:3000/animaux
+HTTP_TIMEOUT=30
+
+# GBIF Configuration
+GBIF_API_URL=https://api.gbif.org/v1
+GBIF_RATE_LIMIT_DELAY=0.2
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=%(asctime)s [%(levelname)s] %(name)s: %(message)s
+
+# Data Directories
+RAW_DATA_DIR=data/raw
+PROCESSED_DATA_DIR=data/processed
+
+# Pipeline
+MAX_ANIMALS_PER_FAMILY=100
+MAX_RECORDS_LIMIT=500
+
+# Production
+PRODUCTION_MODE=false
+ENABLE_RETRY=true
+MAX_RETRIES=3
+
+7.2 DESCRIPTION DES VARIABLES
+------------------------------
+
+API_URL :
+- URL complète de l'API cible
+- Exemple : http://localhost:3000/animaux
+- Production : https://api.mondomaine.com/animaux
+
+HTTP_TIMEOUT :
+- Timeout des requêtes HTTP en secondes
+- Développement : 30
+- Production : 60-120 (selon la latence réseau)
+
+GBIF_RATE_LIMIT_DELAY :
+- Délai entre requêtes GBIF (en secondes)
+- Évite le rate limiting
+- Recommandé : 0.2 à 0.5
+
+LOG_LEVEL :
+- Niveau de verbosité des logs
+- Valeurs : DEBUG, INFO, WARNING, ERROR, CRITICAL
+- Développement : DEBUG ou INFO
+- Production : WARNING ou ERROR
+
+PRODUCTION_MODE :
+- Active le mode production (moins de logs)
+- Valeurs : true ou false
+- Développement : false
+- Production : true
+
+7.3 ACCÈS À LA CONFIGURATION
+-----------------------------
+
+DANS LE CODE PYTHON :
+```python
+from config import Config
+
+# Accéder à une variable
+api_url = Config.API_URL
+timeout = Config.HTTP_TIMEOUT
+
+# Afficher la configuration
+Config.display_config()
+
+# Chemins de données
+raw_path = Config.get_raw_data_path()
+processed_path = Config.get_processed_data_path()
+```
+
+================================================================================
+8. MISE EN PRODUCTION
+================================================================================
+
+8.1 CHECKLIST PRE-PRODUCTION
+-----------------------------
+
+AVANT DE DÉPLOYER EN PRODUCTION, VÉRIFIER :
+
+□ Environnement
+  □ Python 3.11+ installé sur le serveur
+  □ Accès Internet pour GBIF
+  □ API cible accessible et testée
+  □ Ressources suffisantes (CPU, RAM, disque)
+
+□ Configuration
+  □ Fichier .env créé et configuré
+  □ API_URL pointe vers l'API de production
+  □ PRODUCTION_MODE=true
+  □ LOG_LEVEL=WARNING ou ERROR
+  □ HTTP_TIMEOUT adapté à la latence réseau
+
+□ Sécurité
+  □ .env non versionné (dans .gitignore)
+  □ Pas de credentials en dur dans le code
+  □ HTTPS activé pour l'API (si accessible publiquement)
+  □ Firewall configuré
+
+□ Données
+  □ Répertoires data/raw/ et data/processed/ existent
+  □ Permissions d'écriture correctes
+  □ Espace disque suffisant
+
+□ Tests
+  □ Tous les tests unitaires passent
+  □ Test d'intégration complet réussi
+  □ Test manuel avec l'API de production (staging)
+
+□ Monitoring
+  □ Logs configurés et persistants
+  □ Alertes configurées pour les erreurs
+  □ Métriques de performance définies
+
+8.2 POINTS CRITIQUES À MODIFIER POUR LA PRODUCTION
+---------------------------------------------------
+
+1. CONFIGURATION ENVIRONNEMENT (.env)
+   ```
+   API_URL=https://api-prod.mondomaine.com/animaux
+   HTTP_TIMEOUT=120
+   LOG_LEVEL=WARNING
+   PRODUCTION_MODE=true
+   ```
+
+2. LOGGING
+   - Rediriger les logs vers un fichier :
+   ```python
+   logging.basicConfig(
+       level=getattr(logging, Config.LOG_LEVEL),
+       format=Config.LOG_FORMAT,
+       handlers=[
+           logging.FileHandler('/var/log/animalia/pipeline.log'),
+           logging.StreamHandler()
+       ]
+   )
+   ```
+
+3. GESTION D'ERREURS
+   - Implémenter des retry automatiques (Config.ENABLE_RETRY)
+   - Alertes par email/Slack en cas d'échec critique
+   - Circuit breaker pour éviter de surcharger l'API
+
+4. PERFORMANCE
+   - Activer le batch processing pour send.py
+   - Mettre en cache les résultats GBIF (si pertinent)
+   - Exécuter en parallèle avec multiprocessing (si gros volume)
+
+5. SÉCURITÉ
+   - Utiliser des secrets managers (AWS Secrets, Azure Key Vault)
+   - Chiffrer les données sensibles
+   - Auditer les accès API
+
+6. PLANIFICATION
+   - Configurer un cron job ou scheduler (ex: tous les jours à 2h)
+   ```cron
+   0 2 * * * /usr/bin/python3 /opt/animalia/pipeline/src/main.py
+   ```
+
+7. SAUVEGARDE
+   - Backup automatique de data/processed/
+   - Rotation des logs
+   - Archivage des données brutes
+
+8.3 ARCHITECTURE DE PRODUCTION RECOMMANDÉE
+-------------------------------------------
+
+OPTION 1 : Serveur dédié
+- VM Linux (Ubuntu 22.04 LTS recommandé)
+- Cron job pour exécution quotidienne
+- Logs vers syslog ou fichier
+- Monitoring avec Prometheus/Grafana
+
+OPTION 2 : Conteneurisation (Docker)
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY src/ ./src/
+CMD ["python", "src/main.py"]
+```
+
+OPTION 3 : Cloud Functions/Lambdas
+- AWS Lambda / Azure Functions
+- Déclenchement périodique (CloudWatch Events)
+- Stockage S3/Blob Storage pour les données
+
+8.4 MONITORING ET ALERTES
+--------------------------
+
+MÉTRIQUES À SURVEILLER :
+- Nombre d'espèces récupérées par exécution
+- Taux de validation (valides vs erreurs)
+- Taux de succès d'envoi API
+- Durée d'exécution du pipeline
+- Erreurs réseau GBIF
+- Erreurs API cible
+
+ALERTES CRITIQUES :
+- Pipeline échoue complètement
+- API cible inaccessible
+- Aucune donnée validée
+- Taux d'erreur > 50%
+
+OUTILS RECOMMANDÉS :
+- Logs : Logstash, ELK Stack, CloudWatch
+- Monitoring : Prometheus, Grafana, Datadog
+- Alertes : PagerDuty, Slack, Email
+
+8.5 SCALABILITÉ
+---------------
+
+POUR GÉRER UN GRAND VOLUME :
+
+1. Parallélisation du fetch :
+   - Utiliser multiprocessing.Pool
+   - Traiter plusieurs espèces simultanément
+
+2. Batch processing :
+   - Envoyer par lots de 100 à l'API
+   - POST /animaux/batch avec un tableau
+
+3. Base de données intermédiaire :
+   - PostgreSQL/MySQL pour stocker les résultats
+   - Synchronisation incrémentale
+
+4. Queue system :
+   - RabbitMQ/Redis pour gérer les tâches
+   - Workers asynchrones
+
+================================================================================
+9. MAINTENANCE ET DÉPANNAGE
+================================================================================
+
+9.1 PROBLÈMES COURANTS ET SOLUTIONS
+------------------------------------
+
+PROBLÈME 1 : ImportError: No module named 'dotenv'
+SOLUTION :
+```
+pip install python-dotenv
+```
+
+PROBLÈME 2 : API GBIF inaccessible (timeout, ConnectionError)
+SOLUTION :
+- Vérifier la connexion Internet
+- Augmenter HTTP_TIMEOUT dans .env
+- Vérifier le firewall (autoriser api.gbif.org)
+
+PROBLÈME 3 : API cible retourne 404/500
+SOLUTION :
+- Vérifier que l'API est démarrée
+- Tester avec curl : curl -X POST http://localhost:3000/animaux
+- Vérifier l'URL dans .env (API_URL)
+
+PROBLÈME 4 : Aucune donnée validée
+SOLUTION :
+- Vérifier animals_validation_errors.json
+- Corriger le schéma Pydantic si nécessaire
+- Vérifier la qualité des données GBIF
+
+PROBLÈME 5 : FileNotFoundError sur data/raw/
+SOLUTION :
+- Créer manuellement les répertoires :
+```
+mkdir -p src/data/raw src/data/processed
+```
+
+PROBLÈME 6 : Encoding error (caractères spéciaux)
+SOLUTION :
+- Tous les fichiers utilisent encoding='utf8'
+- Vérifier la locale du système : export LANG=en_US.UTF-8
+
+9.2 DEBUGGING
+-------------
+
+ACTIVER LE MODE DEBUG :
+```
+# Dans .env
+LOG_LEVEL=DEBUG
+```
+
+EXÉCUTER AVEC LOGS DÉTAILLÉS :
+```
+python src/main.py 2>&1 | tee pipeline.log
+```
+
+TESTER UN MODULE ISOLÉMENT :
+```
+python -m pdb src/fetch.py
+```
+
+VÉRIFIER LES IMPORTS :
+```
+python -c "import sys; print(sys.path)"
+python -c "from src import config; config.Config.display_config()"
+```
+
+9.3 MAINTENANCE RÉGULIÈRE
+--------------------------
+
+QUOTIDIEN :
+- Vérifier les logs d'exécution
+- Surveiller le taux d'erreur
+
+HEBDOMADAIRE :
+- Archiver les anciennes données
+- Nettoyer data/raw/ si nécessaire
+- Vérifier l'espace disque
+
+MENSUEL :
+- Mettre à jour les dépendances :
+  ```
+  pip list --outdated
+  pip install --upgrade pandas requests pydantic
+  ```
+- Vérifier les tests unitaires
+- Analyser les métriques de performance
+
+ANNUEL :
+- Revue complète du code
+- Audit de sécurité
+- Mise à jour de Python si nécessaire
+
+9.4 LOGS ET DIAGNOSTICS
+------------------------
+
+LOCALISATION DES LOGS :
+- Console (stdout/stderr) par défaut
+- Fichier (si configuré) : /var/log/animalia/pipeline.log
+
+ANALYSER LES LOGS :
+```
+# Filtrer les erreurs
+grep -i error pipeline.log
+
+# Compter les succès
+grep -c "✓" pipeline.log
+
+# Dernières 50 lignes
+tail -n 50 pipeline.log
+```
+
+NIVEAUX DE LOG :
+- DEBUG : Tout (très verbeux)
+- INFO : Informations importantes (recommandé en dev)
+- WARNING : Avertissements
+- ERROR : Erreurs non bloquantes
+- CRITICAL : Erreurs bloquantes
+
+================================================================================
+10. ANNEXES
+================================================================================
+
+10.1 SCHÉMA DU MODÈLE DE DONNÉES
+---------------------------------
+
+AnimalModel (Pydantic) :
+{
+  "nom": "string (OBLIGATOIRE)",          # Ex: "Cervus elaphus"
+  "nom_commun": "string | null",          # Ex: "Cerf élaphe"
+  "rang": "string | null",                # Ex: "species"
+  "statutUICN": "string | null",          # Ex: "LC" (validé)
+  "ordre": "string | null",               # Ex: "Artiodactyla"
+  "famille": "string | null",             # Ex: "Cervidae"
+  "genre": "string | null",               # Ex: "Cervus"
+  "descriptions": "string | null",        # Description de l'espèce
+  "imageUrl": "string | null"             # URL d'une image
+}
+
+10.2 CODES D'ERREUR
+-------------------
+
+EXIT CODES du main.py :
+- 0 : Succès complet
+- 1 : Échec du pipeline
+
+HTTP STATUS CODES gérés :
+- 200 : OK
+- 201 : Created (succès)
+- 4xx : Erreur client (données invalides)
+- 5xx : Erreur serveur
+- Timeout : Dépassement du délai
+
+10.3 RESSOURCES EXTERNES
+-------------------------
+
+DOCUMENTATION GBIF API :
+https://www.gbif.org/developer/species
+
+STATUTS UICN :
+https://www.iucnredlist.org/resources/categories-and-criteria
+
+PYDANTIC :
+https://docs.pydantic.dev/
+
+PYTHON REQUESTS :
+https://requests.readthedocs.io/
+
+10.4 GLOSSAIRE
+--------------
+
+ETL : Extract, Transform, Load (pipeline de données)
+GBIF : Global Biodiversity Information Facility
+UICN : Union Internationale pour la Conservation de la Nature
+Pydantic : Bibliothèque de validation de données Python
+Statut UICN : Niveau de menace d'une espèce
+UsageKey : Identifiant unique GBIF d'un taxon
+Rang taxonomique : Niveau dans la classification (species, genus, etc.)
+
+10.5 CONTACT ET SUPPORT
+------------------------
+
+Auteur : antoine95560@hotmail.fr
+
+Pour signaler un bug :
+- Créer une issue GitHub (si applicable)
+- Envoyer un email avec :
+  * Description du problème
+  * Logs d'erreur
+  * Configuration (.env anonymisée)
+  * Version de Python
+
+================================================================================
+FIN DE LA DOCUMENTATION TECHNIQUE
+================================================================================
+
+Ce document doit être mis à jour à chaque modification majeure du pipeline.
+Dernière révision : 2026-02-05

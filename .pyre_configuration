@@ -1,0 +1,3 @@
+[pyre]
+source_directories = src
+search_path = src,.venv/Lib/site-packages
